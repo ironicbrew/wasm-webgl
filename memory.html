@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Exercise - C ↔ JavaScript</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #1a1a2e;
+            color: #eee;
+            line-height: 1.6;
+        }
+        h1 { color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 0.5rem; }
+        h2 { color: #ff6b6b; margin-top: 2rem; }
+        h3 { color: #ffd93d; }
+        .section {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+        .concept {
+            background: #0f3460;
+            border-left: 4px solid #00d4ff;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        button {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 0.25rem;
+        }
+        button:hover { opacity: 0.9; }
+        .result {
+            font-family: monospace;
+            background: #0f0f23;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+            white-space: pre-wrap;
+        }
+        .success { border-left: 4px solid #00ff88; }
+        .error { border-left: 4px solid #ff6b6b; }
+        .pending { border-left: 4px solid #ffd93d; }
+        code {
+            background: #0f0f23;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+        }
+        pre {
+            background: #0f0f23;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        #status { padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+        .loading { background: #ff9f1c33; color: #ff9f1c; }
+        .ready { background: #00ff8833; color: #00ff88; }
+    </style>
+</head>
+<body>
+    <h1>Memory Exercise: C ↔ JavaScript</h1>
+    
+    <div id="status" class="loading">Loading WebAssembly module...</div>
+
+    <div class="concept">
+        <h3>🧠 Key Concept: Shared Linear Memory</h3>
+        <p>WebAssembly and JavaScript share a single <code>ArrayBuffer</code>. When you allocate memory in C with <code>malloc()</code>, you get an offset into this buffer. JavaScript can read/write at that offset using typed arrays:</p>
+        <ul>
+            <li><code>Module.HEAP8</code> / <code>HEAPU8</code> — Int8 / Uint8</li>
+            <li><code>Module.HEAP16</code> / <code>HEAPU16</code> — Int16 / Uint16</li>
+            <li><code>Module.HEAP32</code> / <code>HEAPU32</code> — Int32 / Uint32</li>
+            <li><code>Module.HEAPF32</code> — Float32 (what we'll use)</li>
+            <li><code>Module.HEAPF64</code> — Float64</li>
+        </ul>
+    </div>
+
+    <h2>Exercise 1: Sum an Array</h2>
+    <div class="section">
+        <p>Pass an array of floats from JS to C and compute the sum.</p>
+        <button onclick="testSum()">Run Test</button>
+        <div id="result1" class="result pending">Click to test...</div>
+        
+        <h3>JavaScript Side (provided):</h3>
+        <pre>
+function sumArray(arr) {
+    // 1. Allocate memory in WASM heap
+    const bytes = arr.length * 4;  // 4 bytes per float
+    const ptr = Module._malloc(bytes);
+    
+    // 2. Copy JS array to WASM memory
+    //    ptr is byte offset, HEAPF32 is indexed by float (4 bytes)
+    //    So we divide ptr by 4 to get the float index
+    Module.HEAPF32.set(arr, ptr / 4);
+    
+    // 3. Call C function
+    const result = Module._sum_floats(ptr, arr.length);
+    
+    // 4. Free the memory
+    Module._free(ptr);
+    
+    return result;
+}</pre>
+        
+        <h3>Your Task in C:</h3>
+        <p>Implement <code>sum_floats()</code> in <code>src/memory.c</code></p>
+    </div>
+
+    <h2>Exercise 2: Return Multiple Values</h2>
+    <div class="section">
+        <p>C can't return multiple values directly, so we pass output pointers.</p>
+        <button onclick="testMinMax()">Run Test</button>
+        <div id="result2" class="result pending">Click to test...</div>
+        
+        <h3>JavaScript Side (provided):</h3>
+        <pre>
+function findMinMax(arr) {
+    // Allocate for input array
+    const dataPtr = Module._malloc(arr.length * 4);
+    Module.HEAPF32.set(arr, dataPtr / 4);
+    
+    // Allocate for TWO output floats (min and max)
+    const minPtr = Module._malloc(4);
+    const maxPtr = Module._malloc(4);
+    
+    // Call C - it writes results to minPtr and maxPtr
+    Module._find_min_max(dataPtr, arr.length, minPtr, maxPtr);
+    
+    // Read results from memory
+    const min = Module.HEAPF32[minPtr / 4];
+    const max = Module.HEAPF32[maxPtr / 4];
+    
+    // Clean up
+    Module._free(dataPtr);
+    Module._free(minPtr);
+    Module._free(maxPtr);
+    
+    return { min, max };
+}</pre>
+        
+        <h3>Your Task in C:</h3>
+        <p>Implement <code>find_min_max()</code> — write to the output pointers with <code>*out_min = value;</code></p>
+    </div>
+
+    <h2>Exercise 3: Modify Data In-Place</h2>
+    <div class="section">
+        <p>Since memory is shared, C can modify data that JS can immediately see!</p>
+        <button onclick="testNormalize()">Run Test</button>
+        <div id="result3" class="result pending">Click to test...</div>
+        
+        <h3>JavaScript Side (provided):</h3>
+        <pre>
+function normalizeArray(arr) {
+    const ptr = Module._malloc(arr.length * 4);
+    Module.HEAPF32.set(arr, ptr / 4);
+    
+    // C modifies the data in-place
+    Module._normalize_in_place(ptr, arr.length);
+    
+    // Read back the modified data
+    const result = new Float32Array(
+        Module.HEAPF32.buffer, ptr, arr.length
+    ).slice();  // slice() copies so we can free
+    
+    Module._free(ptr);
+    return Array.from(result);
+}</pre>
+        
+        <h3>Your Task in C:</h3>
+        <p>Implement <code>normalize_in_place()</code> — scale all values to [0, 1]</p>
+    </div>
+
+    <h2>Bonus: C Allocates, JS Reads</h2>
+    <div class="section">
+        <p>Sometimes C needs to create data. This is already implemented for reference.</p>
+        <button onclick="testGenerate()">Run Test</button>
+        <div id="result4" class="result pending">Click to test...</div>
+        <pre>
+function generateSequence(length, start, step) {
+    // C allocates and returns a pointer
+    const ptr = Module._generate_sequence(length, start, step);
+    
+    if (ptr === 0) throw new Error('Allocation failed');
+    
+    // Read the data C created
+    const result = new Float32Array(
+        Module.HEAPF32.buffer, ptr, length
+    ).slice();
+    
+    // IMPORTANT: We must free what C allocated!
+    Module._free(ptr);
+    
+    return Array.from(result);
+}</pre>
+    </div>
+
+    <script>
+        var Module = {
+            onRuntimeInitialized: function() {
+                document.getElementById('status').className = 'ready';
+                document.getElementById('status').textContent = 'WebAssembly module ready! Edit src/memory.c and rebuild to complete exercises.';
+            }
+        };
+
+        // Test data
+        const testArray = [3.5, 1.2, 7.8, 2.1, 5.5, 9.0, 0.5];
+
+        // Exercise 1: Sum
+        function sumArray(arr) {
+            const ptr = Module._malloc(arr.length * 4);
+            Module.HEAPF32.set(arr, ptr / 4);
+            const result = Module._sum_floats(ptr, arr.length);
+            Module._free(ptr);
+            return result;
+        }
+
+        function testSum() {
+            const result = sumArray(testArray);
+            const expected = testArray.reduce((a, b) => a + b, 0);
+            const passed = Math.abs(result - expected) < 0.01;
+            
+            const el = document.getElementById('result1');
+            el.className = 'result ' + (passed ? 'success' : 'error');
+            el.textContent = `Input: [${testArray.join(', ')}]
+Your result: ${result.toFixed(2)}
+Expected: ${expected.toFixed(2)}
+${passed ? '✓ PASSED!' : '✗ Not quite - implement sum_floats() in memory.c'}`;
+        }
+
+        // Exercise 2: Min/Max
+        function findMinMax(arr) {
+            const dataPtr = Module._malloc(arr.length * 4);
+            Module.HEAPF32.set(arr, dataPtr / 4);
+            const minPtr = Module._malloc(4);
+            const maxPtr = Module._malloc(4);
+            
+            Module._find_min_max(dataPtr, arr.length, minPtr, maxPtr);
+            
+            const min = Module.HEAPF32[minPtr / 4];
+            const max = Module.HEAPF32[maxPtr / 4];
+            
+            Module._free(dataPtr);
+            Module._free(minPtr);
+            Module._free(maxPtr);
+            return { min, max };
+        }
+
+        function testMinMax() {
+            const { min, max } = findMinMax(testArray);
+            const expectedMin = Math.min(...testArray);
+            const expectedMax = Math.max(...testArray);
+            const passed = Math.abs(min - expectedMin) < 0.01 && Math.abs(max - expectedMax) < 0.01;
+            
+            const el = document.getElementById('result2');
+            el.className = 'result ' + (passed ? 'success' : 'error');
+            el.textContent = `Input: [${testArray.join(', ')}]
+Your result: min=${min.toFixed(2)}, max=${max.toFixed(2)}
+Expected: min=${expectedMin.toFixed(2)}, max=${expectedMax.toFixed(2)}
+${passed ? '✓ PASSED!' : '✗ Not quite - implement find_min_max() in memory.c'}`;
+        }
+
+        // Exercise 3: Normalize
+        function normalizeArray(arr) {
+            const ptr = Module._malloc(arr.length * 4);
+            Module.HEAPF32.set(arr, ptr / 4);
+            Module._normalize_in_place(ptr, arr.length);
+            const result = new Float32Array(Module.HEAPF32.buffer, ptr, arr.length).slice();
+            Module._free(ptr);
+            return Array.from(result);
+        }
+
+        function testNormalize() {
+            const result = normalizeArray(testArray);
+            const min = Math.min(...testArray);
+            const max = Math.max(...testArray);
+            const expected = testArray.map(v => (v - min) / (max - min));
+            
+            const allClose = result.every((v, i) => Math.abs(v - expected[i]) < 0.01);
+            const hasZero = result.some(v => Math.abs(v) < 0.01);
+            const hasOne = result.some(v => Math.abs(v - 1) < 0.01);
+            const passed = allClose && hasZero && hasOne;
+            
+            const el = document.getElementById('result3');
+            el.className = 'result ' + (passed ? 'success' : 'error');
+            el.textContent = `Input: [${testArray.join(', ')}]
+Your result: [${result.map(v => v.toFixed(2)).join(', ')}]
+Expected: [${expected.map(v => v.toFixed(2)).join(', ')}]
+${passed ? '✓ PASSED!' : '✗ Not quite - implement normalize_in_place() in memory.c'}`;
+        }
+
+        // Bonus: Generate
+        function generateSequence(length, start, step) {
+            const ptr = Module._generate_sequence(length, start, step);
+            if (ptr === 0) throw new Error('Allocation failed');
+            const result = new Float32Array(Module.HEAPF32.buffer, ptr, length).slice();
+            Module._free(ptr);
+            return Array.from(result);
+        }
+
+        function testGenerate() {
+            const result = generateSequence(5, 10, 2.5);
+            const expected = [10, 12.5, 15, 17.5, 20];
+            const passed = result.every((v, i) => Math.abs(v - expected[i]) < 0.01);
+            
+            const el = document.getElementById('result4');
+            el.className = 'result ' + (passed ? 'success' : 'error');
+            el.textContent = `generate_sequence(5, 10, 2.5)
+Result: [${result.map(v => v.toFixed(1)).join(', ')}]
+Expected: [${expected.map(v => v.toFixed(1)).join(', ')}]
+${passed ? '✓ This one was implemented for you as reference!' : '✗ Something went wrong'}`;
+        }
+    </script>
+    <script src="build/memory.js"></script>
+</body>
+</html>

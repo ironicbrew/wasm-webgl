@@ -1,0 +1,14 @@
+# Build output
+build/
+
+# Emscripten cache
+.emscripten_cache/
+
+# Editor
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
