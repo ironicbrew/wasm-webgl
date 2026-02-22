@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas Rendering from C</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #1a1a2e;
+            color: #eee;
+            line-height: 1.6;
+        }
+        h1 { color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 0.5rem; }
+        h2 { color: #ff6b6b; margin-top: 2rem; }
+        .section {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+        canvas {
+            border: 2px solid #00d4ff;
+            border-radius: 4px;
+            display: block;
+            margin: 1rem 0;
+        }
+        button {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 0.25rem;
+        }
+        button:hover { opacity: 0.9; }
+        button.active { background: #00ff88; }
+        .stats {
+            font-family: monospace;
+            color: #00ff88;
+            margin-top: 0.5rem;
+        }
+        #status { padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+        .loading { background: #ff9f1c33; color: #ff9f1c; }
+        .ready { background: #00ff8833; color: #00ff88; }
+        .concept {
+            background: #0f3460;
+            border-left: 4px solid #00d4ff;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        code {
+            background: #0f0f23;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+        }
+        .controls { margin: 1rem 0; }
+        label { margin-right: 1rem; }
+        input[type="range"] { vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <h1>Canvas Rendering from C</h1>
+    
+    <div id="status" class="loading">Loading WebAssembly module...</div>
+
+    <div class="concept">
+        <h3>🎨 The Rendering Pattern</h3>
+        <p>This is the core pattern for high-performance rendering:</p>
+        <ol>
+            <li><strong>C allocates</strong> a pixel buffer in WebAssembly memory</li>
+            <li><strong>C writes</strong> RGBA pixel data (4 bytes per pixel)</li>
+            <li><strong>JS reads</strong> the buffer and creates an <code>ImageData</code></li>
+            <li><strong>JS draws</strong> to canvas with <code>putImageData()</code></li>
+            <li><strong>Repeat</strong> with <code>requestAnimationFrame()</code></li>
+        </ol>
+    </div>
+
+    <h2>Demo 1: Animated Rendering</h2>
+    <div class="section">
+        <canvas id="canvas1" width="600" height="300"></canvas>
+        <div class="controls">
+            <button id="btnAnimate" onclick="toggleAnimation()">Start Animation</button>
+            <button onclick="renderSingleFrame()">Single Frame</button>
+        </div>
+        <div class="stats" id="stats1">FPS: --</div>
+    </div>
+
+    <h2>Demo 2: Table Grid</h2>
+    <div class="section">
+        <p>Preview of table-like rendering (what you'll do with WebGL later)</p>
+        <canvas id="canvas2" width="600" height="300"></canvas>
+        <div class="controls">
+            <label>Rows: <input type="range" id="rows" min="3" max="20" value="8" oninput="renderTable()"></label>
+            <label>Cols: <input type="range" id="cols" min="2" max="10" value="5" oninput="renderTable()"></label>
+        </div>
+    </div>
+
+    <h2>How It Works</h2>
+    <div class="section">
+        <h3>JavaScript Side:</h3>
+        <pre style="background:#0f0f23;padding:1rem;border-radius:4px;overflow-x:auto;">
+// 1. Initialize buffer in C
+const ptr = Module._init_buffer(width, height);
+
+// 2. Tell C to render
+Module._render_demo_frame(deltaTime);
+
+// 3. Read pixels from WASM memory into ImageData
+const pixels = new Uint8ClampedArray(
+    Module.HEAPU8.buffer,  // The shared memory
+    ptr,                    // Starting offset
+    width * height * 4      // Total bytes (RGBA)
+);
+const imageData = new ImageData(pixels, width, height);
+
+// 4. Draw to canvas
+ctx.putImageData(imageData, 0, 0);</pre>
+
+        <h3>C Side:</h3>
+        <pre style="background:#0f0f23;padding:1rem;border-radius:4px;overflow-x:auto;">
+// Set a pixel at (x, y) to a color
+int index = (y * width + x) * 4;  // 4 bytes per pixel
+buffer[index + 0] = r;  // Red
+buffer[index + 1] = g;  // Green
+buffer[index + 2] = b;  // Blue
+buffer[index + 3] = a;  // Alpha</pre>
+    </div>
+
+    <script>
+        var Module = {
+            onRuntimeInitialized: function() {
+                document.getElementById('status').className = 'ready';
+                document.getElementById('status').textContent = 'WebAssembly module ready!';
+                initCanvases();
+            }
+        };
+
+        let canvas1, ctx1, canvas2, ctx2;
+        let bufferPtr = 0;
+        let animating = false;
+        let lastTime = 0;
+        let frameCount = 0;
+        let fpsTime = 0;
+
+        function initCanvases() {
+            // Setup canvas 1 (animated)
+            canvas1 = document.getElementById('canvas1');
+            ctx1 = canvas1.getContext('2d');
+            
+            // Initialize C buffer for canvas1 size
+            bufferPtr = Module._init_buffer(canvas1.width, canvas1.height);
+            
+            // Setup canvas 2 (table grid)
+            canvas2 = document.getElementById('canvas2');
+            ctx2 = canvas2.getContext('2d');
+            
+            // Initial renders
+            renderSingleFrame();
+            renderTable();
+        }
+
+        function renderSingleFrame() {
+            Module._render_demo_frame(0.016); // ~60fps delta
+            blitToCanvas(ctx1, canvas1.width, canvas1.height);
+        }
+
+        function toggleAnimation() {
+            animating = !animating;
+            document.getElementById('btnAnimate').textContent = animating ? 'Stop' : 'Start Animation';
+            document.getElementById('btnAnimate').className = animating ? 'active' : '';
+            
+            if (animating) {
+                lastTime = performance.now();
+                fpsTime = lastTime;
+                frameCount = 0;
+                requestAnimationFrame(animationLoop);
+            }
+        }
+
+        function animationLoop(timestamp) {
+            if (!animating) return;
+            
+            // Calculate delta time in seconds
+            const deltaTime = (timestamp - lastTime) / 1000;
+            lastTime = timestamp;
+            
+            // FPS counter
+            frameCount++;
+            if (timestamp - fpsTime >= 1000) {
+                document.getElementById('stats1').textContent = `FPS: ${frameCount}`;
+                frameCount = 0;
+                fpsTime = timestamp;
+            }
+            
+            // Render in C
+            Module._render_demo_frame(deltaTime);
+            
+            // Blit to canvas
+            blitToCanvas(ctx1, canvas1.width, canvas1.height);
+            
+            requestAnimationFrame(animationLoop);
+        }
+
+        function blitToCanvas(ctx, width, height) {
+            // Read pixel buffer from WASM memory
+            const pixels = new Uint8ClampedArray(
+                Module.HEAPU8.buffer,
+                bufferPtr,
+                width * height * 4
+            );
+            
+            // Create ImageData and draw
+            const imageData = new ImageData(pixels, width, height);
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        function renderTable() {
+            const rows = parseInt(document.getElementById('rows').value);
+            const cols = parseInt(document.getElementById('cols').value);
+            
+            // Use canvas2 dimensions
+            const ptr2 = Module._init_buffer(canvas2.width, canvas2.height);
+            Module._render_table_grid(rows, cols);
+            
+            // Read and blit
+            const pixels = new Uint8ClampedArray(
+                Module.HEAPU8.buffer,
+                ptr2,
+                canvas2.width * canvas2.height * 4
+            );
+            const imageData = new ImageData(pixels, canvas2.width, canvas2.height);
+            ctx2.putImageData(imageData, 0, 0);
+            
+            // Restore buffer for animation canvas
+            bufferPtr = Module._init_buffer(canvas1.width, canvas1.height);
+        }
+    </script>
+    <script src="build/canvas.js"></script>
+</body>
+</html>
