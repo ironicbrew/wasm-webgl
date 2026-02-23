@@ -1,56 +1,15 @@
-// WebGL Basics: GPU-Accelerated Rendering from C
+// WebGL Interactive Grid - GPU-Accelerated Rendering from C
 //
-// WebGL uses the GPU pipeline:
-// 1. Vertex Shader   - runs once per vertex, positions geometry
-// 2. Rasterization   - GPU converts triangles to pixels
-// 3. Fragment Shader - runs once per pixel, determines color
-//
-// Emscripten maps OpenGL ES 2.0/3.0 calls to WebGL automatically!
+// Renders a data grid with per-cell colors. Emscripten maps OpenGL ES to WebGL.
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <GLES2/gl2.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <math.h>
 #include <string.h>
 
-// Shader program
-static GLuint program = 0;
-static GLuint vbo = 0;
-
-// Uniform locations (variables we pass to shaders)
-static GLint u_time = -1;
-static GLint u_resolution = -1;
-static GLint u_color = -1;
-
-// Canvas size
-static int canvas_width = 800;
-static int canvas_height = 600;
-
-// Animation time
-static float time_elapsed = 0.0f;
-
-// Vertex shader - transforms vertex positions
-// gl_Position is the output (clip space coordinates)
-static const char* vertex_shader_src = 
-    "attribute vec2 a_position;\n"
-    "void main() {\n"
-    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
-    "}\n";
-
-// Fragment shader - determines pixel color
-// gl_FragColor is the output (RGBA)
-static const char* fragment_shader_src =
-    "precision mediump float;\n"
-    "uniform float u_time;\n"
-    "uniform vec2 u_resolution;\n"
-    "uniform vec3 u_color;\n"
-    "void main() {\n"
-    "    vec2 uv = gl_FragCoord.xy / u_resolution;\n"
-    "    float pulse = sin(u_time * 3.0) * 0.2 + 0.8;\n"
-    "    gl_FragColor = vec4(u_color * pulse, 1.0);\n"
-    "}\n";
+static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_ctx = 0;
 
 // Compile a shader and check for errors
 static GLuint compile_shader(GLenum type, const char* source) {
@@ -93,86 +52,35 @@ static GLuint create_program(const char* vert_src, const char* frag_src) {
     return prog;
 }
 
-// Initialize WebGL
+// Initialize WebGL context on the grid canvas
 EMSCRIPTEN_KEEPALIVE
 int init_webgl(int width, int height) {
-    canvas_width = width;
-    canvas_height = height;
-    
-    // Create WebGL context
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
     attrs.alpha = 0;
     attrs.depth = 0;
     attrs.antialias = 1;
-    attrs.majorVersion = 1;  // WebGL 1.0 (OpenGL ES 2.0)
-    
-    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = emscripten_webgl_create_context("#webgl-canvas", &attrs);
-    if (ctx <= 0) {
+    attrs.majorVersion = 1;
+
+    webgl_ctx = emscripten_webgl_create_context("#grid-canvas", &attrs);
+    if (webgl_ctx <= 0) {
         printf("Failed to create WebGL context\n");
         return 0;
     }
-    emscripten_webgl_make_context_current(ctx);
-    
-    // Create shader program
-    program = create_program(vertex_shader_src, fragment_shader_src);
-    if (!program) return 0;
-    
-    // Get uniform locations
-    u_time = glGetUniformLocation(program, "u_time");
-    u_resolution = glGetUniformLocation(program, "u_resolution");
-    u_color = glGetUniformLocation(program, "u_color");
-    
-    // Create a simple quad (two triangles)
-    // Coordinates are in "clip space": -1 to 1
-    float vertices[] = {
-        // Triangle 1
-        -0.8f, -0.6f,
-         0.8f, -0.6f,
-         0.8f,  0.6f,
-        // Triangle 2
-        -0.8f, -0.6f,
-         0.8f,  0.6f,
-        -0.8f,  0.6f
-    };
-    
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    
-    // Set up vertex attribute
-    GLint a_position = glGetAttribLocation(program, "a_position");
-    glEnableVertexAttribArray(a_position);
-    glVertexAttribPointer(a_position, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    
+    emscripten_webgl_make_context_current(webgl_ctx);
     glViewport(0, 0, width, height);
-    
-    printf("WebGL initialized: %dx%d\n", width, height);
     return 1;
 }
 
-// Render a frame
-EMSCRIPTEN_KEEPALIVE
-void render_frame(float delta_time) {
-    time_elapsed += delta_time;
-    
-    // Clear to dark background
-    glClearColor(0.1f, 0.1f, 0.18f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    
-    glUseProgram(program);
-    
-    // Set uniforms
-    glUniform1f(u_time, time_elapsed);
-    glUniform2f(u_resolution, (float)canvas_width, (float)canvas_height);
-    glUniform3f(u_color, 0.0f, 0.83f, 1.0f);  // Cyan
-    
-    // Draw the quad (6 vertices = 2 triangles)
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+// Make context current before GL calls (needed when called from JS event handlers)
+static void ensure_context(void) {
+    if (webgl_ctx > 0) {
+        emscripten_webgl_make_context_current(webgl_ctx);
+    }
 }
 
 // ============================================================
-// TABLE GRID RENDERING - The foundation for your data table!
+// GRID RENDERING
 // ============================================================
 
 // Grid shader - each cell can have its own color
@@ -277,6 +185,7 @@ int init_grid(int rows, int cols) {
 EMSCRIPTEN_KEEPALIVE
 void set_cell_color(int row, int col, int total_cols, float r, float g, float b) {
     if (!grid_vertices) return;
+    ensure_context();
     
     int cell_idx = row * total_cols + col;
     int base = cell_idx * 6 * 5;  // 6 vertices * 5 floats each
@@ -294,6 +203,7 @@ void set_cell_color(int row, int col, int total_cols, float r, float g, float b)
 EMSCRIPTEN_KEEPALIVE
 void update_grid_buffer() {
     if (!grid_vertices || !grid_vbo) return;
+    ensure_context();
     glBindBuffer(GL_ARRAY_BUFFER, grid_vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, grid_vertex_count * 5 * sizeof(float), grid_vertices);
 }
@@ -301,6 +211,7 @@ void update_grid_buffer() {
 // Render the grid
 EMSCRIPTEN_KEEPALIVE
 void render_grid() {
+    ensure_context();
     glClearColor(0.08f, 0.08f, 0.14f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     

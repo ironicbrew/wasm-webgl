@@ -1,5 +1,10 @@
 # Build output
 build/
+public/build/
+
+# Node
+node_modules/
+dist/
 
 # Emscripten cache
 .emscripten_cache/

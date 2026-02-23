@@ -27,7 +27,7 @@ $(OUT_DIR):
 
 # WebGL
 webgl: $(OUT_DIR)
-	$(CC) $(CFLAGS) -s USE_WEBGL2=1 src/webgl.c -o $(OUT_DIR)/webgl.js -lm
+	$(CC) $(CFLAGS) -s USE_WEBGL2=1 c/webgl.c -o $(OUT_DIR)/webgl.js -lm
 	@echo "Built: webgl.js + webgl.wasm"
 
 clean:
