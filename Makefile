@@ -18,29 +18,14 @@ CFLAGS = -O2 \
          -s ALLOW_MEMORY_GROWTH=1 \
          --no-entry
 
-.PHONY: all clean serve basics memory canvas webgl
+.PHONY: all clean serve webgl
 
-all: basics memory canvas webgl
+all: webgl
 
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
-# Lesson 1: Basics
-basics: $(OUT_DIR)
-	$(CC) $(CFLAGS) src/main.c -o $(OUT_DIR)/main.js
-	@echo "Built: main.js + main.wasm"
-
-# Lesson 2: Memory
-memory: $(OUT_DIR)
-	$(CC) $(CFLAGS) src/memory.c -o $(OUT_DIR)/memory.js
-	@echo "Built: memory.js + memory.wasm"
-
-# Lesson 3: Canvas rendering
-canvas: $(OUT_DIR)
-	$(CC) $(CFLAGS) src/canvas.c -o $(OUT_DIR)/canvas.js -lm
-	@echo "Built: canvas.js + canvas.wasm"
-
-# Lesson 4: WebGL
+# WebGL
 webgl: $(OUT_DIR)
 	$(CC) $(CFLAGS) -s USE_WEBGL2=1 src/webgl.c -o $(OUT_DIR)/webgl.js -lm
 	@echo "Built: webgl.js + webgl.wasm"
