@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import WebGLGrid from './components/WebGLGrid'
 
 function App() {
